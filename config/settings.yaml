@@ -8,10 +8,10 @@
 mode: "yadisk"          # "yadisk" | "local"
 
 # ─── Яндекс Диск — папки ───
-videos_folder: "/PachcaVideos"
-settings_folder: "/settings"
-prompts_folder: "/settings/prompts"
-output_folder: "/settings/output"
+# Промпты и настройки хранятся на GitHub (prompts/, config/)
+# Яндекс Диск используется только для видео и результатов
+videos_folder: "/PachcaVideos"          # входные видео
+output_folder: "/settings/output"       # результаты транскрибации
 
 max_videos: 5
 skip_already_transcribed: true

@@ -59,7 +59,6 @@ def main(config_path=None):
     from .llm import init_gigachat, run_gigachat_analysis, load_prompts_from_files
     from .storage import (
         download_videos, upload_results, load_progress, save_progress,
-        load_prompts_from_yadisk,
     )
     from .utils import (
         free_gpu, format_output_txt, detect_problem_zones,
@@ -81,7 +80,6 @@ def main(config_path=None):
     WORK_DIR                = cfg.get("work_dir", "/kaggle/working/results")
     DOWNLOAD_DIR            = cfg.get("download_dir", "/kaggle/working/videos")
     VIDEOS_FOLDER           = cfg.get("videos_folder", "/PachcaVideos")
-    PROMPTS_FOLDER          = cfg.get("prompts_folder", "/settings/prompts")
     OUTPUT_FOLDER           = cfg.get("output_folder", "/settings/output")
     MAX_VIDEOS              = cfg.get("max_videos", 5)
     SKIP_ALREADY_TRANSCRIBED = cfg.get("skip_already_transcribed", True)
@@ -152,19 +150,10 @@ def main(config_path=None):
         if not gigachat_client:
             print("   GigaChat недоступен — LLM-анализ будет пропущен")
 
-    # ── Загрузка промптов ──
-    print("\nЗагрузка промптов...")
-    prompts = {}
-    if YANDEX_TOKEN and MODE == "yadisk":
-        import yadisk as _yadisk_lib
-        _yd = _yadisk_lib.YaDisk(token=YANDEX_TOKEN)
-        # Читаем дефолтные промпты из файлов проекта как fallback
-        default_prompts = load_prompts_from_files()
-        prompts = load_prompts_from_yadisk(_yd, PROMPTS_FOLDER, default_prompts)
-        del _yd
-    else:
-        prompts = load_prompts_from_files()
-        print("   Используем локальные промпты из prompts/")
+    # ── Загрузка промптов из репозитория (prompts/) ──
+    print("\nЗагрузка промптов из GitHub репозитория...")
+    prompts = load_prompts_from_files()
+    print(f"   Загружено промптов: {len(prompts)}")
 
     # ── Загрузка Silero VAD ──
     silero_model, silero_utils = None, None

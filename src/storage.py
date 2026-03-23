@@ -277,38 +277,5 @@ def _upload_metrics(yd, output_folder, base_name, analytics, llm_result,
     return local_metrics_dir
 
 
-# ─────────────────────────────────────────────
-# Промпты с Яндекс Диска
-# ─────────────────────────────────────────────
-
-def load_prompts_from_yadisk(yd, prompts_folder, default_prompts=None):
-    """
-    Загружает промпты с Яндекс Диска.
-    Если файлы не существуют — создаёт их с дефолтными значениями.
-    Возвращает словарь {имя_файла: текст}.
-    """
-    default_prompts = default_prompts or {}
-    prompts = {}
-    try:
-        if not yd.exists(prompts_folder):
-            yd.mkdir(prompts_folder)
-            print(f"   Создана папка промптов: {prompts_folder}")
-
-        for fname, default_text in default_prompts.items():
-            remote_path = f"{prompts_folder}/{fname}"
-            local_path  = f"/tmp/{fname}"
-            if yd.exists(remote_path):
-                yd.download(remote_path, local_path)
-                with open(local_path, encoding="utf-8") as f:
-                    prompts[fname] = f.read()
-                print(f"   Промпт загружен: {fname}")
-            else:
-                with open(local_path, "w", encoding="utf-8") as f:
-                    f.write(default_text)
-                yd.upload(local_path, remote_path)
-                prompts[fname] = default_text
-                print(f"   Создан дефолтный промпт: {fname}")
-    except Exception as e:
-        print(f"   Ошибка загрузки промптов: {e} — используем встроенные")
-        prompts = {k: v for k, v in default_prompts.items()}
-    return prompts
+# Промпты хранятся в репозитории GitHub (prompts/)
+# Используй src/llm.py → load_prompts_from_files()
