@@ -1,0 +1,11 @@
+Транскрипция:
+{transcript}
+
+Метрики:
+{metrics}
+
+Верни JSON:
+{"topic": "тема", "overall_score": 1-10,
+  "scores": {"structure": {"score": 1-10, "comment": ""}, "engagement": {"score": 1-10, "comment": ""},
+              "clarity": {"score": 1-10, "comment": ""}, "pacing": {"score": 1-10, "comment": ""}},
+  "strengths": [], "weaknesses": [], "recommendations": []}

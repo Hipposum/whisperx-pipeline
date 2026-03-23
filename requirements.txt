@@ -1,0 +1,52 @@
+# WhisperX Pipeline v6 — зависимости
+# Установка: pip install -r requirements.txt
+
+# ── Транскрибация ──
+whisperx
+faster-whisper
+ctranslate2
+av
+
+# ── Диаризация ──
+pyannote.audio
+pyannote.core
+pyannote.database
+pyannote.metrics
+pyannote.pipeline
+speechbrain
+asteroid-filterbanks
+hyperpyyaml
+torch-audiomentations
+einops
+lightning
+
+# ── Трансформеры (совместимая версия) ──
+transformers>=4.40,<4.52
+tokenizers>=0.21,<0.22
+huggingface-hub>=0.30,<1.0
+
+# ── Шумоподавление ──
+noisereduce
+
+# ── Яндекс Диск ──
+yadisk
+
+# ── GigaChat LLM ──
+gigachat
+
+# ── Конфигурация ──
+pyyaml
+
+# ── Аудио / ML ──
+soundfile
+numpy<2.0
+scipy>=1.11
+scikit-learn
+nltk
+rich
+optuna
+docopt
+
+# ── PyTorch (устанавливается отдельно под нужный CUDA) ──
+# torch
+# torchaudio
