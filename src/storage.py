@@ -285,11 +285,12 @@ def _upload_metrics(yd, output_folder, base_name, analytics, llm_result,
         "fillers":               analytics.get("fillers", {}),
         "questions":             analytics.get("questions", {}),
         "engagement":            analytics.get("engagement", {}),
-        "llm_timeline":          (llm_result or {}).get("timeline"),
-        "llm_assessment":        (llm_result or {}).get("assessment"),
-        "llm_comment":           (llm_result or {}).get("comment"),
-        "llm_total_score":       (llm_result or {}).get("total_score"),
-        "llm_lesson_topic":      (llm_result or {}).get("lesson_topic"),
+        "llm_timeline":            (llm_result or {}).get("timeline"),
+        "llm_assessment":          (llm_result or {}).get("assessment"),
+        "llm_comment":             (llm_result or {}).get("comment"),
+        "llm_total_score":         (llm_result or {}).get("total_score"),
+        "llm_lesson_topic":        (llm_result or {}).get("lesson_topic"),
+        "llm_recording_complete":  (llm_result or {}).get("recording_complete"),
     }
 
     saved = []

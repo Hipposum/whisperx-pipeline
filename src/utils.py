@@ -275,8 +275,11 @@ def format_metrics_txt(analytics, llm_result, audio_duration, file_name=""):
         lines.append(sep2)
         score = llm_result.get("total_score")
         topic = llm_result.get("lesson_topic", "")
+        rec_complete = llm_result.get("recording_complete")
         if topic:
             lines.append(row("Тема урока", topic))
+        if rec_complete is False:
+            lines.append(f"  ⚠  ЗАПИСЬ НЕПОЛНАЯ — урок начат не с начала или обрывается")
         if score is not None:
             lines.append(row("ИТОГОВЫЙ БАЛЛ", f"{score} / 14"))
         lines.append("")
