@@ -20,14 +20,14 @@ language: "ru"
 whisper_model: "large-v3"
 batch_size: 4           # T4: 4, P100: 8
 compute_type: "float16"
-beam_size: 10
+beam_size: 5
 word_timestamps: true
 condition_on_previous: false
 chunk_length: 20
 no_speech_threshold: 0.05
 compression_ratio_threshold: 2.4
 temperature_fallback: [0.0, 0.2, 0.4, 0.6, 0.8, 1.0]
-initial_prompt: false
+initial_prompt: "Онлайн-урок математики. Учитель и ученики обсуждают задачи, решают примеры."
 
 # ─── Silero VAD ───
 use_silero_vad: true
@@ -58,8 +58,8 @@ align_model: null
 return_char_alignments: false
 interpolate_method: "nearest"
 diarize: true
-min_speakers: null
-max_speakers: null
+min_speakers: 2
+max_speakers: 12
 diarize_model: "pyannote/speaker-diarization-3.1"
 
 # ─── GigaChat LLM-анализ ───
@@ -68,6 +68,9 @@ gigachat_model: "GigaChat"
 gigachat_scope: "GIGACHAT_API_PERS"
 gigachat_temperature: 0.3
 gigachat_max_transcript_chars: 25000
+
+# ─── Валидация ───
+min_duration_sec: 120    # видео короче 2 мин — пропускать
 
 # ─── Вывод ───
 upload_results_to_yadisk: true

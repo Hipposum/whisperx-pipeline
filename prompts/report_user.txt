@@ -4,8 +4,26 @@
 Метрики:
 {metrics}
 
-Верни JSON:
-{"topic": "тема", "overall_score": 1-10,
-  "scores": {"structure": {"score": 1-10, "comment": ""}, "engagement": {"score": 1-10, "comment": ""},
-              "clarity": {"score": 1-10, "comment": ""}, "pacing": {"score": 1-10, "comment": ""}},
-  "strengths": [], "weaknesses": [], "recommendations": []}
+Оцени урок и верни JSON:
+{{"assessment": {{
+    "quality_sound":       {{"rating": "В норме", "comment": ""}},
+    "quality_recording":   {{"rating": "Без оценки", "comment": "нужен просмотр видео"}},
+    "quality_demo":        {{"rating": "Без оценки", "comment": "нужен просмотр видео"}},
+    "background":          {{"rating": "Без оценки", "comment": "нужен просмотр видео"}},
+    "homework_discussion": {{"rating": "", "comment": ""}},
+    "communication":       {{"rating": "", "comment": ""}},
+    "answering_questions":  {{"rating": "", "comment": ""}},
+    "practice":            {{"rating": "", "comment": ""}},
+    "subject_knowledge":   {{"rating": "", "comment": ""}},
+    "new_homework":        {{"rating": "", "comment": ""}},
+    "group_dynamics":      {{"rating": "", "comment": ""}},
+    "structure_clarity":   {{"rating": "", "comment": ""}}
+  }},
+  "total_score": 14,
+  "lesson_topic": "",
+  "comment": "Развёрнутое замечание"
+}}
+
+Рейтинг каждого критерия: "В норме" / "Спорно" / "Особое внимание" / "Без оценки".
+structure_clarity: "Легко" / "Средне" / "Сложно".
+total_score: 0-14, снижай за "Спорно" (-0.5) и "Особое внимание" (-1.5).

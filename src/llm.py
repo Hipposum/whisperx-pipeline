@@ -31,6 +31,8 @@ def load_prompts_from_files(prompts_dir=None):
         "timeline_user.txt",
         "report_system.txt",
         "report_user.txt",
+        "combined_system.txt",
+        "combined_user.txt",
     ]
     result = {}
     for name in names:
@@ -114,6 +116,9 @@ def gc_req(client, sys_p, user_p, temperature, max_tokens=4096):
             ],
             max_tokens=max_tokens, temperature=temperature
         ))
+        if hasattr(resp, "usage") and resp.usage:
+            u = resp.usage
+            print(f"   Токены: вход={u.prompt_tokens} выход={u.completion_tokens} итого={u.total_tokens}")
         return resp.choices[0].message.content.strip()
     except Exception as e:
         print(f"   GigaChat ошибка: {e}")
@@ -154,35 +159,72 @@ def run_gigachat_analysis(client, transcript_txt, analytics, config, segments=No
     if not prompts:
         prompts = load_prompts_from_files()
 
-    TIMELINE_SYSTEM = prompts.get("timeline_system.txt", "")
-    TIMELINE_PROMPT = prompts.get("timeline_user.txt", "")
-    REPORT_SYSTEM   = prompts.get("report_system.txt", "")
-    REPORT_PROMPT   = prompts.get("report_user.txt", "")
-
     print(f"\nGigaChat анализ...")
     compressed = (compress_transcript(segments, GIGACHAT_MAX_TRANSCRIPT_CHARS)
                   if segments else transcript_txt[:GIGACHAT_MAX_TRANSCRIPT_CHARS])
 
-    print("   Таймлайн урока...")
-    timeline = parse_json(gc_req(
-        client, TIMELINE_SYSTEM,
-        TIMELINE_PROMPT.format(transcript=compressed),
-        temperature=GIGACHAT_TEMPERATURE
-    ))
-
-    print("   Оценка качества...")
     metrics_short = {k: analytics.get(k)
                      for k in ["noise", "balance", "speech_tempo", "engagement", "questions"]}
-    report = parse_json(gc_req(
-        client, REPORT_SYSTEM,
-        REPORT_PROMPT.format(
-            transcript=compressed[:15000],
-            metrics=json.dumps(metrics_short, ensure_ascii=False, indent=2)
-        ),
-        temperature=GIGACHAT_TEMPERATURE
-    ))
 
-    if report and "overall_score" in report:
-        print(f"   Оценка: {report['overall_score']}/10")
+    COMBINED_SYSTEM = prompts.get("combined_system.txt", "")
+    COMBINED_PROMPT = prompts.get("combined_user.txt", "")
 
-    return {"timeline": timeline, "report": report}
+    if COMBINED_SYSTEM and COMBINED_PROMPT:
+        # Один запрос → таймлайн + асессмент
+        print("   Анализ (1 запрос)...")
+        raw = gc_req(
+            client, COMBINED_SYSTEM,
+            COMBINED_PROMPT.format(
+                transcript=compressed,
+                metrics=json.dumps(metrics_short, ensure_ascii=False, indent=2)
+            ),
+            temperature=GIGACHAT_TEMPERATURE,
+            max_tokens=4096
+        )
+        combined = parse_json(raw)
+        if combined and "timeline" in combined and "assessment" in combined:
+            result = combined
+        elif combined and "timeline" in combined:
+            result = combined
+            result.setdefault("assessment", None)
+        else:
+            result = {"timeline": combined, "assessment": None,
+                      "total_score": None, "comment": None}
+    else:
+        # Фолбэк: два отдельных запроса
+        TIMELINE_SYSTEM = prompts.get("timeline_system.txt", "")
+        TIMELINE_PROMPT = prompts.get("timeline_user.txt", "")
+        REPORT_SYSTEM   = prompts.get("report_system.txt", "")
+        REPORT_PROMPT   = prompts.get("report_user.txt", "")
+
+        print("   Таймлайн урока...")
+        timeline = parse_json(gc_req(
+            client, TIMELINE_SYSTEM,
+            TIMELINE_PROMPT.format(transcript=compressed),
+            temperature=GIGACHAT_TEMPERATURE
+        ))
+
+        print("   Оценка качества...")
+        assessment = parse_json(gc_req(
+            client, REPORT_SYSTEM,
+            REPORT_PROMPT.format(
+                transcript=compressed,
+                metrics=json.dumps(metrics_short, ensure_ascii=False, indent=2)
+            ),
+            temperature=GIGACHAT_TEMPERATURE
+        ))
+
+        result = {"timeline": timeline}
+        if isinstance(assessment, dict):
+            result.update(assessment)
+        else:
+            result["assessment"] = assessment
+
+    score = result.get("total_score")
+    if score is not None:
+        print(f"   Итог: {score}/14")
+    topic = result.get("lesson_topic")
+    if topic:
+        print(f"   Тема: {topic}")
+
+    return result

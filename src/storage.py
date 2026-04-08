@@ -64,8 +64,10 @@ def load_progress(progress_file):
 
 
 def save_progress(progress, progress_file):
-    with open(progress_file, 'w') as f:
+    tmp = progress_file + ".tmp"
+    with open(tmp, 'w') as f:
         json.dump(progress, f, ensure_ascii=False, indent=2)
+    os.replace(tmp, progress_file)
 
 
 # ─────────────────────────────────────────────
@@ -254,7 +256,10 @@ def _upload_metrics(yd, output_folder, base_name, analytics, llm_result,
         "questions":             analytics.get("questions", {}),
         "engagement":            analytics.get("engagement", {}),
         "llm_timeline":          (llm_result or {}).get("timeline"),
-        "llm_report":            (llm_result or {}).get("report"),
+        "llm_assessment":        (llm_result or {}).get("assessment"),
+        "llm_comment":           (llm_result or {}).get("comment"),
+        "llm_total_score":       (llm_result or {}).get("total_score"),
+        "llm_lesson_topic":      (llm_result or {}).get("lesson_topic"),
     }
 
     saved = []

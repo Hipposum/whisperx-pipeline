@@ -16,6 +16,7 @@ pipeline.py — основная точка входа. Оркестрирует
 import gc
 import json
 import os
+import shutil
 import time
 import warnings
 from pathlib import Path
@@ -26,6 +27,44 @@ import torchaudio
 import yaml
 
 warnings.filterwarnings("ignore")
+
+
+# ─────────────────────────────────────────────
+# Чекпоинты (per-stage resume)
+# ─────────────────────────────────────────────
+
+class _NpEncoder(json.JSONEncoder):
+    """JSON-encoder с поддержкой numpy scalar/array."""
+    def default(self, obj):
+        if isinstance(obj, np.integer):  return int(obj)
+        if isinstance(obj, np.floating): return float(obj)
+        if isinstance(obj, np.ndarray):  return obj.tolist()
+        return super().default(obj)
+
+
+def _ckpt_dir(work_dir, base_name):
+    d = os.path.join(work_dir, f"_{base_name}_ckpt")
+    os.makedirs(d, exist_ok=True)
+    return d
+
+
+def _save_ckpt(work_dir, base_name, stage, data):
+    path = os.path.join(_ckpt_dir(work_dir, base_name), f"s{stage}.json")
+    with open(path, "w", encoding="utf-8") as f:
+        json.dump(data, f, ensure_ascii=False, cls=_NpEncoder)
+
+
+def _load_ckpt(work_dir, base_name, stage):
+    path = os.path.join(os.path.join(work_dir, f"_{base_name}_ckpt"), f"s{stage}.json")
+    if os.path.exists(path):
+        with open(path, encoding="utf-8") as f:
+            return json.load(f)
+    return None
+
+
+def _clear_ckpt(work_dir, base_name):
+    shutil.rmtree(os.path.join(work_dir, f"_{base_name}_ckpt"), ignore_errors=True)
+
 
 if not hasattr(torchaudio, 'list_audio_backends'):
     torchaudio.list_audio_backends = lambda: ["soundfile"]
@@ -173,6 +212,8 @@ def main(config_path=None):
     # ГЛАВНЫЙ ЦИКЛ ОБРАБОТКИ
     # ════════════════════════════════════════════════════════════════════
 
+    MIN_DURATION_SEC = cfg.get("min_duration_sec", 120)  # пропускать видео < 2 мин
+
     for file_idx, vf in enumerate(video_files, 1):
         file_path = vf['local_path']
         file_name = vf['name']
@@ -185,85 +226,177 @@ def main(config_path=None):
             print(f"   (извлечено из {vf['from_zip']})")
         print(f"{'='*65}")
 
+        # ── Загрузка чекпоинтов текущего видео ────────────────────────
+        ckpt2 = _load_ckpt(WORK_DIR, base_name, 2)
+        ckpt3 = _load_ckpt(WORK_DIR, base_name, 3)
+        ckpt4 = _load_ckpt(WORK_DIR, base_name, 4)
+        ckpt5 = _load_ckpt(WORK_DIR, base_name, 5)
+        ckpt6 = _load_ckpt(WORK_DIR, base_name, 6)
+        ckpt7 = _load_ckpt(WORK_DIR, base_name, 7)
+        if any([ckpt2, ckpt3, ckpt4, ckpt5, ckpt6, ckpt7]):
+            found = [s for s, c in [(2,ckpt2),(3,ckpt3),(4,ckpt4),(5,ckpt5),(6,ckpt6),(7,ckpt7)] if c]
+            print(f"   Найден чекпоинт: этапы {found} — продолжаем с места остановки")
+
+        # Нужно ли загружать аудио (не нужно если этапы 2-5 уже в кэше)
+        need_audio = not (ckpt2 and ckpt3 and ckpt4 and ckpt5)
+
         # ── Этап 1/7: Загрузка аудио ──────────────────────────────────
-        print(f"\nЭтап 1/7: Загрузка аудио")
-        t0 = time.time()
-        audio, audio_duration = load_audio(file_path)
-        print(f"   {audio_duration:.0f}с ({audio_duration/60:.1f} мин) | {time.time()-t0:.1f}с")
+        if need_audio:
+            print(f"\nЭтап 1/7: Загрузка аудио")
+            t0 = time.time()
+            try:
+                audio, audio_duration = load_audio(file_path)
+            except Exception as e:
+                print(f"   ОШИБКА загрузки аудио: {e} — пропускаем")
+                continue
+            print(f"   {audio_duration:.0f}с ({audio_duration/60:.1f} мин) | {time.time()-t0:.1f}с")
+            if audio_duration < MIN_DURATION_SEC:
+                print(f"   Видео слишком короткое ({audio_duration:.0f}с < {MIN_DURATION_SEC}с) — пропускаем")
+                continue
+        else:
+            audio = None
+            audio_duration = ckpt2.get("audio_duration", 0)
+            print(f"\nЭтап 1/7: Загрузка аудио — пропущено (из кэша, {audio_duration/60:.1f} мин)")
 
         # ── Этап 1б/7: Шумоподавление ─────────────────────────────────
-        print(f"\nЭтап 1б/7: Шумоподавление + нормализация")
-        if USE_NOISE_REDUCE:
-            audio = apply_noise_reduction(
-                audio,
-                cfg.get("nr_prop_decrease", 0.4),
-                cfg.get("nr_stationary", False)
-            )
-        else:
-            print("   Пропущено (use_noise_reduce=false)")
+        if need_audio and not ckpt2:
+            print(f"\nЭтап 1б/7: Шумоподавление + нормализация")
+            if USE_NOISE_REDUCE:
+                audio = apply_noise_reduction(
+                    audio,
+                    cfg.get("nr_prop_decrease", 0.4),
+                    cfg.get("nr_stationary", False)
+                )
+            else:
+                print("   Пропущено (use_noise_reduce=false)")
 
         # ── Этап 2/7: Транскрибация — проход 1 ────────────────────────
-        print(f"\nЭтап 2/7: Транскрибация — проход 1 ({WHISPER_MODEL})")
-        result, n_raw, _ = transcribe_pass1(
-            audio, cfg, DEVICE, silero_model, silero_utils
-        )
+        if ckpt2:
+            print(f"\nЭтап 2/7: Транскрибация — [из кэша]")
+            result = {"segments": ckpt2["segments"]}
+            n_raw = ckpt2["n_raw"]
+        else:
+            print(f"\nЭтап 2/7: Транскрибация — проход 1 ({WHISPER_MODEL})")
+            try:
+                result, n_raw, _ = transcribe_pass1(
+                    audio, cfg, DEVICE, silero_model, silero_utils
+                )
+            except Exception as e:
+                print(f"   ОШИБКА транскрибации: {e} — пропускаем видео")
+                free_gpu()
+                continue
+            _save_ckpt(WORK_DIR, base_name, 2, {
+                "segments": result["segments"], "n_raw": n_raw,
+                "audio_duration": round(audio_duration, 1)
+            })
 
         # ── Этап 3/7: Пост-обработка + Проход 2 ───────────────────────
-        print(f"\nЭтап 3/7: Пост-обработка + {'проход 2' if ENABLE_PASS2 else 'без прохода 2'}")
-        clean_segs, problem_zones, removal_log = detect_problem_zones(
-            result["segments"], n_raw, audio=audio, sr=16000,
-            pass2_low_confidence=cfg.get("pass2_low_confidence", 0.45)
-        )
-        n_removed = len(removal_log)
-
-        pass2_log = []
-        if ENABLE_PASS2 and problem_zones:
-            recovered_segs, pass2_log = retranscribe_zones(audio, problem_zones, cfg, DEVICE)
-            segments_merged = merge_pass2_segments(clean_segs, recovered_segs)
+        if ckpt3:
+            print(f"\nЭтап 3/7: Пост-обработка — [из кэша]")
+            segments_merged = ckpt3["segments_merged"]
+            pass2_log       = ckpt3["pass2_log"]
+            n_removed       = ckpt3["n_removed"]
+            n_recovered     = ckpt3["n_recovered"]
+            n_placeholders  = sum(1 for s in segments_merged if s.get("_is_placeholder"))
+            print(f"   {len(segments_merged)} сегм. | восстановлено: {n_recovered} | неразборчиво: {n_placeholders}")
         else:
-            placeholders = [{
-                "start": round(z["start"], 3), "end": round(z["end"], 3),
-                "text": f"[неразборчиво — {z['end'] - z['start']:.1f}с]",
-                "speaker": "UNKNOWN", "_is_placeholder": True,
-            } for z in problem_zones]
-            segments_merged = merge_pass2_segments(clean_segs, placeholders)
-
-        n_placeholders = sum(1 for s in segments_merged if s.get("_is_placeholder"))
-        n_recovered = sum(1 for l in pass2_log if l.get("status") == "recovered")
-        print(f"   Итого: {len(segments_merged)} сегм. | восстановлено: {n_recovered} | неразборчиво: {n_placeholders}")
+            print(f"\nЭтап 3/7: Пост-обработка + {'проход 2' if ENABLE_PASS2 else 'без прохода 2'}")
+            clean_segs, problem_zones, removal_log = detect_problem_zones(
+                result["segments"], n_raw, audio=audio, sr=16000,
+                pass2_low_confidence=cfg.get("pass2_low_confidence", 0.45)
+            )
+            n_removed = len(removal_log)
+            pass2_log = []
+            if ENABLE_PASS2 and problem_zones:
+                recovered_segs, pass2_log = retranscribe_zones(audio, problem_zones, cfg, DEVICE)
+                segments_merged = merge_pass2_segments(clean_segs, recovered_segs)
+            else:
+                placeholders = [{
+                    "start": round(z["start"], 3), "end": round(z["end"], 3),
+                    "text": f"[неразборчиво — {z['end'] - z['start']:.1f}с]",
+                    "speaker": "UNKNOWN", "_is_placeholder": True,
+                } for z in problem_zones]
+                segments_merged = merge_pass2_segments(clean_segs, placeholders)
+            n_placeholders = sum(1 for s in segments_merged if s.get("_is_placeholder"))
+            n_recovered    = sum(1 for l in pass2_log if l.get("status") == "recovered")
+            print(f"   Итого: {len(segments_merged)} сегм. | восстановлено: {n_recovered} | неразборчиво: {n_placeholders}")
+            _save_ckpt(WORK_DIR, base_name, 3, {
+                "segments_merged": segments_merged,
+                "pass2_log": pass2_log,
+                "n_removed": n_removed,
+                "n_recovered": n_recovered,
+            })
 
         # ── Этап 4/7: Alignment ────────────────────────────────────────
-        print(f"\nЭтап 4/7: Выравнивание (wav2vec2)")
-        t0 = time.time()
-        aligned_result, all_segments, placeholders_list = run_alignment(
-            audio, segments_merged, cfg, DEVICE
-        )
-        print(f"   {time.time()-t0:.0f}с")
+        if ckpt4:
+            print(f"\nЭтап 4/7: Выравнивание — [из кэша]")
+            all_segments     = ckpt4["all_segments"]
+            placeholders_list = ckpt4["placeholders"]
+            aligned_result   = {"word_segments": ckpt4["word_segments"]}
+        else:
+            print(f"\nЭтап 4/7: Выравнивание (wav2vec2)")
+            t0 = time.time()
+            aligned_result, all_segments, placeholders_list = run_alignment(
+                audio, segments_merged, cfg, DEVICE
+            )
+            print(f"   {time.time()-t0:.0f}с")
+            _save_ckpt(WORK_DIR, base_name, 4, {
+                "all_segments": all_segments,
+                "placeholders": placeholders_list,
+                "word_segments": aligned_result.get("word_segments", []),
+            })
 
         # ── Этап 5/7: Диаризация ──────────────────────────────────────
-        if DIARIZE and HF_TOKEN:
-            segments = run_diarization(
-                audio, aligned_result, all_segments, placeholders_list,
-                cfg, DEVICE, HF_TOKEN
-            )
+        if ckpt5:
+            print(f"\nЭтап 5/7: Диаризация — [из кэша]")
+            segments = ckpt5["segments"]
+        elif DIARIZE and HF_TOKEN:
+            try:
+                segments = run_diarization(
+                    audio, aligned_result, all_segments, placeholders_list,
+                    cfg, DEVICE, HF_TOKEN
+                )
+                _save_ckpt(WORK_DIR, base_name, 5, {"segments": segments})
+            except Exception as e:
+                print(f"   ОШИБКА диаризации: {e} — продолжаем без спикеров")
+                segments = all_segments
+                free_gpu()
         else:
             print(f"\nЭтап 5: Диаризация пропущена")
             segments = all_segments
 
+        # Аудио больше не нужно — освобождаем память
+        if audio is not None:
+            del audio
+            free_gpu()
+            audio = None
+
         # ── Этап 6/7: Аналитика ───────────────────────────────────────
-        print(f"\nЭтап 6/7: Аналитика")
-        analytics = run_all_analytics(audio, segments, n_raw, n_removed, pass2_log, sr=16000)
+        if ckpt6:
+            print(f"\nЭтап 6/7: Аналитика — [из кэша]")
+            analytics = ckpt6["analytics"]
+        else:
+            print(f"\nЭтап 6/7: Аналитика")
+            # analytics нужен audio только для SNR — загружаем снова если нужно
+            _audio_for_analytics, _ = load_audio(file_path)
+            analytics = run_all_analytics(_audio_for_analytics, segments, n_raw, n_removed, pass2_log, sr=16000)
+            del _audio_for_analytics
+            _save_ckpt(WORK_DIR, base_name, 6, {"analytics": analytics})
 
         # ── Этап 7/7: GigaChat LLM-анализ ────────────────────────────
-        llm_result = None
-        if RUN_LLM_ANALYSIS and gigachat_client:
+        if ckpt7:
+            print(f"\nЭтап 7/7: GigaChat LLM-анализ — [из кэша]")
+            llm_result = ckpt7["llm_result"]
+        elif RUN_LLM_ANALYSIS and gigachat_client:
             print(f"\nЭтап 7/7: GigaChat LLM-анализ")
             transcript_txt = format_output_txt(segments, file_name=file_name)
             llm_result = run_gigachat_analysis(
                 gigachat_client, transcript_txt, analytics, cfg,
                 segments=segments, prompts=prompts
             )
+            _save_ckpt(WORK_DIR, base_name, 7, {"llm_result": llm_result})
         else:
+            llm_result = None
             print(f"\nЭтап 7: LLM-анализ пропущен")
 
         # ── Сохранение: 2 файла ──────────────────────────────────────
@@ -291,6 +424,12 @@ def main(config_path=None):
             },
             "analytics": analytics,
             "llm_analysis": llm_result,
+            "human_review": {
+                "reviewed_by": None,
+                "reviewed_at": None,
+                "corrections": None,
+                "notes": None,
+            },
         }
         with open(metrics_path, "w", encoding="utf-8") as f:
             json.dump(metrics_data, f, ensure_ascii=False, indent=2, default=str)
@@ -309,10 +448,11 @@ def main(config_path=None):
             except Exception as e:
                 print(f"   Яндекс.Диск: {str(e)[:100]}")
 
-        # ── Прогресс ──
+        # ── Прогресс + очистка чекпоинтов ──
         remote_key = vf.get('remote_path') or file_name
         progress["transcribed"].append(remote_key)
         save_progress(progress, progress_file)
+        _clear_ckpt(WORK_DIR, base_name)
 
         # ── Итоговый отчёт ──
         total_elapsed = time.time() - total_start
@@ -326,9 +466,12 @@ def main(config_path=None):
         print(f"   Шумность: {analytics['noise']['score']}/10 ({analytics['noise']['verdict']})")
         print(f"   Баланс: учитель {analytics['balance']['teacher_pct']:.0f}% | ученики {analytics['balance']['students_pct']:.0f}%")
         print(f"   Вовлечённость: {analytics['engagement']['score']}/10 ({analytics['engagement']['verdict']})")
-        if llm_result and llm_result.get("report") and isinstance(llm_result["report"], dict):
-            r = llm_result["report"]
-            print(f"   GigaChat: {r.get('overall_score', '?')}/10 | Тема: {r.get('topic', '?')}")
+        if llm_result:
+            assessment = llm_result.get("assessment") or llm_result.get("report")
+            if isinstance(assessment, dict):
+                score = llm_result.get("total_score", "?")
+                topic = llm_result.get("lesson_topic", "?")
+                print(f"   GigaChat: {score}/14 | Тема: {topic}")
         if stats:
             print(f"\nСпикеры:")
             for sp, st in sorted(stats.items(), key=lambda x: -x[1]["duration"]):
@@ -343,7 +486,10 @@ def main(config_path=None):
             except Exception:
                 pass
 
-        del audio, result, segments, aligned_result
+        try:
+            del result, segments, aligned_result
+        except NameError:
+            pass
         free_gpu()
 
     print(f"\n{'='*65}")
