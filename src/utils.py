@@ -157,13 +157,27 @@ def format_metrics_txt(analytics, llm_result, audio_duration, file_name=""):
     sep2 = "─" * W
     lines = []
 
-    def row(label, value, width=W):
-        dots = "." * (width - len(label) - len(str(value)) - 2)
-        return f"  {label} {dots} {value}"
+    # ── Строим карту SPEAKER_XX → Спикер N ──
+    SKIP_SPEAKERS = {"UNKNOWN", "?", "SPEAKER_??", ""}
+    _all_spk = set()
+    for _src in [analytics.get("speech_tempo", {}),
+                 analytics.get("balance", {}).get("by_speaker", {})]:
+        for _sp in _src:
+            if _sp and _sp not in SKIP_SPEAKERS:
+                _all_spk.add(_sp)
+    _speaker_map = {sp: f"Спикер {i}" for i, sp in enumerate(sorted(_all_spk), 1)}
 
-    def rating_bar(score, max_score=10):
-        filled = int(round(score / max_score * 10))
-        return "█" * filled + "░" * (10 - filled) + f"  {score}/{max_score}"
+    def sp_label(raw):
+        """SPEAKER_XX → 'Спикер N', неизвестных оставляем как есть."""
+        if not raw or raw in SKIP_SPEAKERS:
+            return raw or "?"
+        return _speaker_map.get(raw, raw)
+
+    def row(label, value, width=W):
+        label_s = str(label)
+        value_s = str(value)
+        dots = max(1, width - len(label_s) - len(value_s) - 2)
+        return f"  {label_s} {'.' * dots} {value_s}"
 
     lines += [sep, f"  ОТЧЁТ ПО УРОКУ: {file_name}", sep, ""]
 
@@ -178,12 +192,13 @@ def format_metrics_txt(analytics, llm_result, audio_duration, file_name=""):
     fmt_map = {"group": "Групповой", "individual": "Индивидуальный"}
     lines.append(row("Формат урока",  fmt_map.get(info.get("format", ""), "—")))
     lines.append(row("Спикеров",      info.get("n_speakers", "—")))
-    lines.append(row("Учитель",       info.get("teacher_speaker", "—")))
+    teacher_raw = info.get("teacher_speaker", "")
+    lines.append(row("Учитель",       sp_label(teacher_raw) if teacher_raw else "—"))
 
     tq = analytics.get("transcription_quality", {})
-    lines.append(row("Сегментов всего",    tq.get("total_raw", "—")))
+    lines.append(row("Сегментов всего",      tq.get("total_raw", "—")))
     lines.append(row("Восстановлено (pass2)", tq.get("pass2_recovered", 0)))
-    lines.append(row("Неразборчивых",     tq.get("placeholders", 0)))
+    lines.append(row("Неразборчивых",         tq.get("placeholders", 0)))
     lines.append("")
 
     # ── Метрики ──
@@ -191,8 +206,8 @@ def format_metrics_txt(analytics, llm_result, audio_duration, file_name=""):
     lines.append(sep2)
 
     noise = analytics.get("noise", {})
-    lines.append(row("Качество звука",  f"{noise.get('score',0):.1f}/10  {noise.get('verdict','')}"))
-    lines.append(row("SNR",             f"{noise.get('snr_db','?')} дБ"))
+    lines.append(row("Качество звука", f"{noise.get('score',0):.1f}/10  {noise.get('verdict','')}"))
+    lines.append(row("SNR",            f"{noise.get('snr_db','?')} дБ"))
     lines.append("")
 
     bal = analytics.get("balance", {})
@@ -202,19 +217,29 @@ def format_metrics_txt(analytics, llm_result, audio_duration, file_name=""):
     lines.append("")
 
     eng = analytics.get("engagement", {})
-    lines.append(row("Вовлечённость",        f"{eng.get('score',0):.1f}/10  {eng.get('verdict','')}"))
-    lines.append(row("Реплик учеников/мин",  f"{eng.get('reply_rate_per_min','?')}"))
+    lines.append(row("Вовлечённость",         f"{eng.get('score',0):.1f}/10  {eng.get('verdict','')}"))
+    lines.append(row("Реплик учеников/мин",   f"{eng.get('reply_rate_per_min','?')}"))
     lines.append(row("Средняя длина реплики", f"{eng.get('avg_reply_words','?')} слов"))
     lines.append("")
 
     pauses = analytics.get("pauses", {})
-    lines.append(row("Пауз всего",     f"{pauses.get('count',0)} шт"))
-    lines.append(row("Суммарно пауз",  f"{pauses.get('total_pause_sec',0):.0f} сек"))
+    lines.append(row("Пауз всего",    f"{pauses.get('count',0)} шт"))
+    lines.append(row("Суммарно пауз", f"{pauses.get('total_pause_sec',0):.0f} сек"))
     if pauses.get("longest"):
         lines.append(row("Самая длинная пауза",
             f"{pauses['longest']['duration']:.1f}с в {pauses['longest']['time']}"))
     if pauses.get("pauses_over_10s"):
         lines.append(row("Пауз > 10 сек", str(len(pauses["pauses_over_10s"]))))
+
+    # Выделяем очень длинные паузы (≥ 60 сек) — явный сигнал для асессора
+    long_pauses = [p for p in pauses.get("pauses_over_10s", [])
+                   if p.get("duration", 0) >= 60]
+    if long_pauses:
+        lines.append(f"  ⚠  ДЛИННЫЕ ПАУЗЫ (≥60с): {len(long_pauses)} шт")
+        for p in sorted(long_pauses, key=lambda x: -x["duration"])[:5]:
+            mins = int(p["duration"] // 60)
+            secs = int(p["duration"] % 60)
+            lines.append(f"      {p['time']} — {p['duration']:.0f}с  ({mins}мин {secs:02d}с)")
     lines.append("")
 
     q = analytics.get("questions", {})
@@ -223,22 +248,25 @@ def format_metrics_txt(analytics, llm_result, audio_duration, file_name=""):
     lines.append(row("Риторических",      q.get("rhetorical", 0)))
     lines.append("")
 
+    # ── Темп речи (фильтруем технические метки) ──
     tempo = analytics.get("speech_tempo", {})
-    if tempo:
+    tempo_filtered = {sp: t for sp, t in tempo.items() if sp not in SKIP_SPEAKERS}
+    if tempo_filtered:
         lines.append("  ТЕМП РЕЧИ ПО СПИКЕРАМ")
         lines.append(sep2)
-        for sp, t in sorted(tempo.items()):
-            wpm = t.get("wpm", 0)
-            lines.append(row(sp, f"{wpm:.0f} сл/мин  {t.get('assessment','')}"))
+        for sp, t in sorted(tempo_filtered.items()):
+            lines.append(row(sp_label(sp), f"{t.get('wpm',0):.0f} сл/мин  {t.get('assessment','')}"))
         lines.append("")
 
+    # ── Слова-паразиты (фильтруем технические метки) ──
     fillers = analytics.get("fillers", {})
-    if fillers:
+    fillers_filtered = {sp: f for sp, f in fillers.items() if sp not in SKIP_SPEAKERS}
+    if fillers_filtered:
         lines.append("  СЛОВА-ПАРАЗИТЫ")
         lines.append(sep2)
-        for sp, f in sorted(fillers.items()):
+        for sp, f in sorted(fillers_filtered.items()):
             top = ", ".join(f.get("top", [])) or "—"
-            lines.append(row(sp, f"{f.get('per_100_words',0):.1f}/100 слов  ({top})"))
+            lines.append(row(sp_label(sp), f"{f.get('per_100_words',0):.1f}/100 слов  ({top})"))
         lines.append("")
 
     # ── GigaChat оценка ──
@@ -267,6 +295,11 @@ def format_metrics_txt(analytics, llm_result, audio_duration, file_name=""):
             "group_dynamics":      "Групповая динамика",
             "structure_clarity":   "Структура и понятность",
         }
+        # Иконки: "Легко"/"Средне"/"Сложно" — только для structure_clarity
+        ICON_MAP = {
+            "В норме": "✓", "Спорно": "!", "Особое внимание": "✗", "Без оценки": "·",
+            "Легко": "✓", "Средне": "!", "Сложно": "✗",
+        }
         assessment = llm_result.get("assessment", {}) or {}
         for key, name in CRITERION_NAMES.items():
             c = assessment.get(key, {})
@@ -274,7 +307,7 @@ def format_metrics_txt(analytics, llm_result, audio_duration, file_name=""):
                 continue
             rating  = c.get("rating", "—")
             comment = c.get("comment", "")
-            icon = {"В норме": "✓", "Спорно": "!", "Особое внимание": "✗", "Без оценки": "·"}.get(rating, " ")
+            icon = ICON_MAP.get(rating, " ")
             lines.append(f"  {icon} {name:<32} {rating}")
             if comment and comment not in ("нужен просмотр видео", ""):
                 lines.append(f"      → {comment}")
@@ -284,12 +317,18 @@ def format_metrics_txt(analytics, llm_result, audio_duration, file_name=""):
         if comment:
             lines.append("  КОММЕНТАРИЙ")
             lines.append(sep2)
-            # Перенос длинных строк
+            # Перенос длинных строк по ширине W
+            current = ""
             for word in comment.split():
-                if not lines[-1].startswith("  ") or len(lines[-1]) + len(word) + 1 > W - 2:
-                    lines.append("  " + word)
+                if not current:
+                    current = "  " + word
+                elif len(current) + 1 + len(word) <= W - 2:
+                    current += " " + word
                 else:
-                    lines[-1] += " " + word
+                    lines.append(current)
+                    current = "  " + word
+            if current:
+                lines.append(current)
             lines.append("")
 
         if llm_result.get("timeline"):
