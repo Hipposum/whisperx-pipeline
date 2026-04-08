@@ -49,9 +49,9 @@ def apply_noise_reduction(audio, nr_prop_decrease, nr_stationary):
         rms_after = float(np.sqrt(np.mean(audio_reduced ** 2)))
         peak = float(np.max(np.abs(audio_reduced)))
         print(f"   После шумоподавления: RMS={rms_after:.5f}, max={peak:.5f}")
-        if peak < 1e-6:
-            print("   ПРЕДУПРЕЖДЕНИЕ: сигнал после шумоподавления почти нулевой — отключаем шумоподавление!")
-            return audio  # возвращаем оригинал
+        if np.isnan(peak) or np.isinf(peak) or peak < 1e-6:
+            print("   ПРЕДУПРЕЖДЕНИЕ: NaN/нулевой сигнал после шумоподавления — используем оригинал")
+            return audio  # возвращаем оригинал без изменений
         audio = audio_reduced / (peak + 1e-9)
         print(f"   Шумоподавление применено (stationary={nr_stationary}, prop_decrease={nr_prop_decrease})")
     except Exception as e:

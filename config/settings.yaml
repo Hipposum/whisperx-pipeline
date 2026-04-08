@@ -40,7 +40,7 @@ vad_offset: 0.02
 # ─── Шумоподавление (Этап 1б) ───
 use_noise_reduce: true
 nr_prop_decrease: 0.4
-nr_stationary: false
+nr_stationary: true   # false даёт NaN на длинных файлах (>30 мин)
 
 # ─── Проход 2 (повторная транскрибация проблемных зон) ───
 enable_pass2: true
