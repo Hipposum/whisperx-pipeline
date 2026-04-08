@@ -104,7 +104,11 @@ def transcribe_pass1(audio, config, device, silero_model=None, silero_utils=None
                 )
             speech_ratio = sum(t['end'] - t['start'] for t in speech_timestamps) / audio_duration * 100
             print(f"   Silero VAD: {len(speech_timestamps)} речевых фрагментов | речь: {speech_ratio:.0f}%")
-            vad_options = None  # Silero уже нашёл речевые зоны
+            if len(speech_timestamps) == 0:
+                print("   Silero VAD не нашёл речь — переключаемся на pyannote VAD")
+                vad_options = {"vad_onset": 0.01, "vad_offset": 0.02}
+            else:
+                vad_options = None  # Silero уже нашёл речевые зоны
         except Exception as e:
             print(f"   Silero VAD ошибка: {e} — переключаемся на pyannote VAD")
             vad_options = {"vad_onset": 0.05, "vad_offset": 0.1}

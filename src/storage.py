@@ -214,6 +214,14 @@ def upload_results(yandex_token, output_folder, base_name, saved_files,
     yd = yadisk_lib.YaDisk(token=yandex_token)
     video_folder = f"{output_folder}/{base_name}"
 
+    # Создаём директории рекурсивно
+    for folder in [output_folder, video_folder]:
+        try:
+            if not yd.exists(folder):
+                yd.mkdir(folder)
+        except Exception:
+            pass
+
     # Основные файлы
     for sf in saved_files:
         remote = f"{video_folder}/{os.path.basename(sf)}"

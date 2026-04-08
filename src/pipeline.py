@@ -290,6 +290,11 @@ def main(config_path=None):
                 "audio_duration": round(audio_duration, 1)
             })
 
+        if n_raw == 0 and not ckpt3:
+            print(f"\n   0 сегментов — речь не обнаружена, пропускаем видео")
+            free_gpu()
+            continue
+
         # ── Этап 3/7: Пост-обработка + Проход 2 ───────────────────────
         if ckpt3:
             print(f"\nЭтап 3/7: Пост-обработка — [из кэша]")
