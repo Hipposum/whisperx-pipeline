@@ -11,7 +11,7 @@ mode: "yadisk"          # "yadisk" | "local"
 videos_folder: "/PachcaVideos"    # папка с входными видео
 output_folder: "/settings/output" # папка для результатов транскрибации
 
-max_videos: 5
+max_videos: 1
 skip_already_transcribed: true
 local_file: ""          # путь к локальному файлу (если mode="local")
 
