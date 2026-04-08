@@ -204,6 +204,19 @@ def download_videos(yandex_token, videos_folder, download_dir, work_dir,
 # Загрузка результатов на Яндекс Диск
 # ─────────────────────────────────────────────
 
+def _yadisk_mkdirs(yd, path):
+    """Создаёт директорию и все родительские папки на Яндекс.Диске."""
+    parts = [p for p in path.strip('/').split('/') if p]
+    current = ""
+    for part in parts:
+        current = f"{current}/{part}"
+        try:
+            if not yd.exists(current):
+                yd.mkdir(current)
+        except Exception:
+            pass  # уже существует или ошибка — продолжаем
+
+
 def upload_results(yandex_token, output_folder, base_name, saved_files,
                    analytics, llm_result, audio_duration, proc_time, file_name):
     """
@@ -214,13 +227,8 @@ def upload_results(yandex_token, output_folder, base_name, saved_files,
     yd = yadisk_lib.YaDisk(token=yandex_token)
     video_folder = f"{output_folder}/{base_name}"
 
-    # Создаём директории рекурсивно
-    for folder in [output_folder, video_folder]:
-        try:
-            if not yd.exists(folder):
-                yd.mkdir(folder)
-        except Exception:
-            pass
+    # Создаём директории рекурсивно (каждый уровень пути отдельно)
+    _yadisk_mkdirs(yd, video_folder)
 
     # Основные файлы
     for sf in saved_files:
@@ -245,11 +253,7 @@ def _upload_metrics(yd, output_folder, base_name, analytics, llm_result,
     local_metrics_dir = f"/kaggle/working/results/{base_name}/metrics"
     os.makedirs(local_metrics_dir, exist_ok=True)
 
-    try:
-        if not yd.exists(metrics_folder):
-            yd.mkdir(metrics_folder)
-    except Exception:
-        pass
+    _yadisk_mkdirs(yd, metrics_folder)
 
     sections = {
         "meta":                  {"file": file_name, "audio_duration_sec": round(audio_duration, 1),
