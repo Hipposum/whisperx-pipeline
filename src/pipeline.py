@@ -97,10 +97,10 @@ def main(config_path=None):
     from .analytics import run_all_analytics
     from .llm import init_gigachat, run_gigachat_analysis, load_prompts_from_files
     from .storage import (
-        download_videos, upload_results, load_progress, save_progress,
+        download_videos, upload_results, load_progress, save_progress, upload_progress,
     )
     from .utils import (
-        free_gpu, format_output_txt, detect_problem_zones,
+        free_gpu, format_output_txt, format_metrics_txt, detect_problem_zones,
         merge_pass2_segments, compute_stats,
     )
 
@@ -394,7 +394,7 @@ def main(config_path=None):
             llm_result = ckpt7["llm_result"]
         elif RUN_LLM_ANALYSIS and gigachat_client:
             print(f"\nЭтап 7/7: GigaChat LLM-анализ")
-            transcript_txt = format_output_txt(segments, file_name=file_name)
+            transcript_txt = format_output_txt(segments, file_name=file_name, analytics=analytics)
             llm_result = run_gigachat_analysis(
                 gigachat_client, transcript_txt, analytics, cfg,
                 segments=segments, prompts=prompts
@@ -404,15 +404,23 @@ def main(config_path=None):
             llm_result = None
             print(f"\nЭтап 7: LLM-анализ пропущен")
 
-        # ── Сохранение: 2 файла ──────────────────────────────────────
+        # ── Сохранение в подпапку по имени видео ─────────────────────
+        video_dir = os.path.join(WORK_DIR, base_name)
+        os.makedirs(video_dir, exist_ok=True)
+
         print(f"\nСохранение...")
-        transcript_path = os.path.join(WORK_DIR, f"{base_name}_transcript.txt")
-        transcript_content = format_output_txt(segments, file_name=file_name)
+        transcript_path = os.path.join(video_dir, f"{base_name}_transcript.txt")
+        transcript_content = format_output_txt(segments, file_name=file_name, analytics=analytics)
         with open(transcript_path, "w", encoding="utf-8") as f:
             f.write(transcript_content)
         print(f"   {os.path.basename(transcript_path)} ({os.path.getsize(transcript_path)/1024:.0f} KB)")
 
-        metrics_path = os.path.join(WORK_DIR, f"{base_name}_metrics.json")
+        report_path = os.path.join(video_dir, f"{base_name}_report.txt")
+        with open(report_path, "w", encoding="utf-8") as f:
+            f.write(format_metrics_txt(analytics, llm_result, audio_duration, file_name))
+        print(f"   {os.path.basename(report_path)} ({os.path.getsize(report_path)/1024:.0f} KB)")
+
+        metrics_path = os.path.join(video_dir, f"{base_name}_metrics.json")
         metrics_data = {
             "file": file_name,
             "pipeline_version": "v6",
@@ -440,7 +448,7 @@ def main(config_path=None):
             json.dump(metrics_data, f, ensure_ascii=False, indent=2, default=str)
         print(f"   {os.path.basename(metrics_path)} ({os.path.getsize(metrics_path)/1024:.0f} KB)")
 
-        saved_files = [transcript_path, metrics_path]
+        saved_files = [transcript_path, report_path, metrics_path]
 
         # ── Загрузка на Яндекс.Диск ──
         if UPLOAD_RESULTS and YANDEX_TOKEN:
@@ -448,7 +456,8 @@ def main(config_path=None):
                 upload_results(
                     YANDEX_TOKEN, OUTPUT_FOLDER, base_name, saved_files,
                     analytics, llm_result, audio_duration,
-                    time.time() - total_start, file_name
+                    time.time() - total_start, file_name,
+                    local_work_dir=WORK_DIR
                 )
             except Exception as e:
                 print(f"   Яндекс.Диск: {str(e)[:100]}")
@@ -457,6 +466,8 @@ def main(config_path=None):
         remote_key = vf.get('remote_path') or file_name
         progress["transcribed"].append(remote_key)
         save_progress(progress, progress_file)
+        if MODE == "yadisk":
+            upload_progress(YANDEX_TOKEN, VIDEOS_FOLDER, progress_file)
         _clear_ckpt(WORK_DIR, base_name)
 
         # ── Итоговый отчёт ──

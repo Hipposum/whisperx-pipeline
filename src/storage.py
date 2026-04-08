@@ -70,6 +70,22 @@ def save_progress(progress, progress_file):
     os.replace(tmp, progress_file)
 
 
+def upload_progress(yandex_token, videos_folder, progress_file):
+    """Сохраняет файл прогресса на Яндекс.Диск чтобы не транскрибировать повторно."""
+    if not yandex_token or not os.path.exists(progress_file):
+        return
+    try:
+        import yadisk as yadisk_lib
+        yd = yadisk_lib.YaDisk(token=yandex_token)
+        remote = f"{videos_folder}/transcription_progress.json"
+        if yd.exists(remote):
+            yd.remove(remote)
+        yd.upload(progress_file, remote)
+        print(f"   Прогресс сохранён на Я.Диск: {remote}")
+    except Exception as e:
+        print(f"   Не удалось сохранить прогресс на Я.Диск: {e}")
+
+
 # ─────────────────────────────────────────────
 # Сканирование Яндекс Диска
 # ─────────────────────────────────────────────
@@ -218,7 +234,8 @@ def _yadisk_mkdirs(yd, path):
 
 
 def upload_results(yandex_token, output_folder, base_name, saved_files,
-                   analytics, llm_result, audio_duration, proc_time, file_name):
+                   analytics, llm_result, audio_duration, proc_time, file_name,
+                   local_work_dir="/kaggle/working/results"):
     """
     Загружает результаты транскрибации и метрики на Яндекс Диск.
     """
@@ -243,14 +260,15 @@ def upload_results(yandex_token, output_folder, base_name, saved_files,
 
     # Раздельные файлы метрик
     _upload_metrics(yd, output_folder, base_name, analytics, llm_result,
-                    audio_duration, proc_time, file_name)
+                    audio_duration, proc_time, file_name, local_work_dir)
 
 
 def _upload_metrics(yd, output_folder, base_name, analytics, llm_result,
-                    audio_duration, proc_time, file_name):
+                    audio_duration, proc_time, file_name,
+                    local_work_dir="/kaggle/working/results"):
     """Сохраняет метрики в JSON-файлы и загружает на Яндекс Диск."""
     metrics_folder = f"{output_folder}/{base_name}/metrics"
-    local_metrics_dir = f"/kaggle/working/results/{base_name}/metrics"
+    local_metrics_dir = os.path.join(local_work_dir, base_name, "metrics")
     os.makedirs(local_metrics_dir, exist_ok=True)
 
     _yadisk_mkdirs(yd, metrics_folder)
