@@ -38,7 +38,7 @@ vad_onset: 0.01
 vad_offset: 0.02
 
 # ─── Шумоподавление (Этап 1б) ───
-use_noise_reduce: true
+use_noise_reduce: false  # Whisper large-v3 справляется с шумом сам; NR искажает речь
 nr_prop_decrease: 0.4
 nr_stationary: true   # false даёт NaN на длинных файлах (>30 мин)
 
